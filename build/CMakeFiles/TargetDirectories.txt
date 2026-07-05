@@ -1,0 +1,10 @@
+/home/alraies/Projects/BoltKV/build/CMakeFiles/storage_engine.dir
+/home/alraies/Projects/BoltKV/build/CMakeFiles/network_server.dir
+/home/alraies/Projects/BoltKV/build/CMakeFiles/BoltKV_db.dir
+/home/alraies/Projects/BoltKV/build/CMakeFiles/test.dir
+/home/alraies/Projects/BoltKV/build/CMakeFiles/edit_cache.dir
+/home/alraies/Projects/BoltKV/build/CMakeFiles/rebuild_cache.dir
+/home/alraies/Projects/BoltKV/build/tests/CMakeFiles/storage_test.dir
+/home/alraies/Projects/BoltKV/build/tests/CMakeFiles/test.dir
+/home/alraies/Projects/BoltKV/build/tests/CMakeFiles/edit_cache.dir
+/home/alraies/Projects/BoltKV/build/tests/CMakeFiles/rebuild_cache.dir
