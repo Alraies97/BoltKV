@@ -7,10 +7,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-
-COPY include/ ./include/
-COPY src/ ./src/
-COPY CMakeLists.txt .
+COPY . .
 
 RUN mkdir build && \
     cd build && \
