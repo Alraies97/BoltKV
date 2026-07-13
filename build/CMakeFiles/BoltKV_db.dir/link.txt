@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/BoltKV_db.dir/link.d CMakeFiles/BoltKV_db.dir/src/main.cpp.o -o BoltKV_db  libstorage_engine.a libnetwork_server.a libstorage_engine.a

@@ -1,2 +1,0 @@
-/usr/bin/ar qc libstorage_engine.a CMakeFiles/storage_engine.dir/src/storage/storage_engine.cpp.o
-/usr/bin/ranlib libstorage_engine.a

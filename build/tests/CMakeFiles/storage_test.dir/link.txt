@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/storage_test.dir/link.d CMakeFiles/storage_test.dir/storage_test.cpp.o -o storage_test  ../libstorage_engine.a
