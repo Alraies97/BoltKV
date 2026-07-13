@@ -25,3 +25,7 @@ __pycache__/
 # BoltKV Database Logs & AOF Persistence File
 *.aof
 bolt_log.aof
+
+# Docker config
+Dockerfile
+
