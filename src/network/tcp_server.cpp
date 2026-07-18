@@ -7,21 +7,29 @@
 #include <sys/epoll.h>
 #include <cstring>
 #include <sstream>
-
 #include <vector>
 
 constexpr int MAX_EVENTS = 64;
 constexpr int BUFFER_SIZE = 1024;
 
-namespace BoltKV {
+namespace BoltKV
+{
 
 TcpServer::TcpServer(int port, StorageEngine& engine) 
-    : port_(port), server_fd_(-1), epoll_fd_(-1), engine_(engine) {}
+    : port_(port), server_fd_(-1), epoll_fd_(-1), engine_(engine)
+{
+}
 
 TcpServer::~TcpServer() 
 {
-    if (server_fd_ != -1) close(server_fd_);
-    if (epoll_fd_ != -1) close(epoll_fd_);
+    if (server_fd_ != -1)
+    {
+        close(server_fd_);
+    }
+    if (epoll_fd_ != -1)
+    {
+        close(epoll_fd_);
+    }
 }
 
 void TcpServer::set_nonblocking(int fd) 
@@ -33,7 +41,8 @@ void TcpServer::set_nonblocking(int fd)
 void TcpServer::setup_socket() 
 {
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd_ == -1) {
+    if (server_fd_ == -1)
+    {
         throw std::runtime_error("Failed to create socket");
     }
 
@@ -88,13 +97,17 @@ void TcpServer::start()
         {
             if (events[i].data.fd == server_fd_) 
             {
-                while (true) {
+                while (true)
+                {
                     sockaddr_in client_addr;
                     socklen_t client_len = sizeof(client_addr);
                     int client_fd = accept(server_fd_, (struct sockaddr*)&client_addr, &client_len);
                     if (client_fd == -1) 
                     {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) break; 
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            break; 
+                        }
                         break;
                     }
                     set_nonblocking(client_fd);
@@ -104,7 +117,8 @@ void TcpServer::start()
                     client_ev.data.fd = client_fd;
                     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &client_ev);
                 }
-            } else if (events[i].events & EPOLLIN)
+            }
+            else if (events[i].events & EPOLLIN)
             {
                 handle_client_data(events[i].data.fd);
             }
@@ -129,12 +143,17 @@ void TcpServer::handle_client_data(int client_fd)
         if (bytes_read > 0) 
         {
             raw_request.append(buffer, bytes_read);
-        } else if (bytes_read == -1) 
+        }
+        else if (bytes_read == -1) 
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break; 
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                break; 
+            }
             close(client_fd);
             return;
-        } else 
+        }
+        else 
         { 
             close(client_fd);
             return;
@@ -154,11 +173,18 @@ std::string TcpServer::process_command(const std::string& raw_command)
     std::string cmd, key, value;
     ss >> cmd >> key;
 
-    for (auto &c : cmd) c = toupper(c);
+    for (auto &c : cmd)
+    {
+        c = toupper(c);
+    }
 
-    if (cmd == "SET") {
+    if (cmd == "SET")
+    {
         std::getline(ss >> std::ws, value);
-        if (!value.empty() && value.back() == '\r') value.pop_back();
+        if (!value.empty() && value.back() == '\r')
+        {
+            value.pop_back();
+        }
         
         engine_.set(key, value);
         return "+OK\r\n";
@@ -176,6 +202,11 @@ std::string TcpServer::process_command(const std::string& raw_command)
     {
         bool deleted = engine_.del(key);
         return deleted ? ":1\r\n" : ":0\r\n";
+    }
+    else if (cmd == "COMPACT")
+    {
+        engine_.rewrite_aof();
+        return "+OK AOF Log Compacted Cleanly\r\n";
     }
 
     return "-ERR Unknown Command\r\n";

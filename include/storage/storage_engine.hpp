@@ -46,11 +46,15 @@ public:
      * @brief Loads and replays the AOF log file from disk to recover state on startup.
      */
     void load_aof();
+    void rewrite_aof();
 
 private:
     std::unordered_map<std::string, std::string> registry_;
     mutable std::shared_mutex rw_mutex_;
     std::ofstream aof_file_;
+    
+    size_t command_count_ = 0;
+    const size_t COMPACT_THRESHOLD = 10000;
 
     void append_to_aof(const std::string& cmd, const std::string& key, const std::string& value = "");
 };
