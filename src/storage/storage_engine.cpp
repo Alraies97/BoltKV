@@ -16,15 +16,23 @@ void StorageEngine::append_to_aof(const std::string& cmd, const std::string& key
 {
     if (aof_file_.is_open())
     {
+        std::string line;
         if (cmd == "SET")
         {
-            aof_file_ << "SET " << key << " " << value << "\n";
+            line = "SET " + key + " " + value + "\n";
+            aof_file_ << line;
         }
         else if (cmd == "DEL")
         {
-            aof_file_ << "DEL " << key << "\n";
+            line = "DEL " + key + "\n";
+            aof_file_ << line;
         }
         aof_file_.flush(); 
+
+        if (is_compacting_)
+        {
+            aof_rewrite_buf_.push_back(line);
+        }
     }
 }
 
@@ -130,47 +138,72 @@ void StorageEngine::load_aof()
 
 void StorageEngine::rewrite_aof()
 {
-    std::string tmp_filename = "bolt_log.tmp";
-    std::ofstream tmp_file(tmp_filename, std::ios::out | std::ios::binary);
-
-    if (!tmp_file.is_open())
+   if (is_compacting_)
     {
-        std::cerr << "[Compaction] Failed to open temporary AOF file" << std::endl;
         return;
     }
 
+    is_compacting_ = true;
+
+    std::unordered_map<std::string, std::string> registry_snapshot;
     {
         std::shared_lock<std::shared_mutex> lock(rw_mutex_);
-        for (const auto& [key, value] : registry_)
+        registry_snapshot = registry_;
+    }
+
+    std::thread background_worker([this, snapshot = std::move(registry_snapshot)]() mutable
+    {
+        std::string tmp_filename = "bolt_log.tmp";
+        std::ofstream tmp_file(tmp_filename, std::ios::out | std::ios::binary);
+
+        if (!tmp_file.is_open())
+        {
+            is_compacting_ = false;
+            return;
+        }
+
+        for (const auto& [key, value] : snapshot)
         {
             tmp_file << "SET " << key << " " << value << "\n";
         }
-    } 
+        tmp_file.close();
 
-    tmp_file.close();
-
-    // المرحلة الثانية: استبدال الملفات بشكل ذري (آمن)
-    {
-        // نأخذ قفل كتابة كامل (Unique) لضمان عدم قيام أي عميل بالكتابة أثناء عملية التبديل
-        std::unique_lock<std::shared_mutex> lock(rw_mutex_);
-        
-        if (aof_file_.is_open())
         {
-            aof_file_.close();
+            std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+
+            std::ofstream append_tmp(tmp_filename, std::ios::app | std::ios::binary);
+            if (append_tmp.is_open())
+            {
+                for (const auto& cmd_line : aof_rewrite_buf_)
+                {
+                    append_tmp << cmd_line;
+                }
+                aof_rewrite_buf_.clear(); 
+                append_tmp.close();
+            }
+
+            if (aof_file_.is_open())
+            {
+                aof_file_.close();
+            }
+
+            try
+            {
+                std::filesystem::rename(tmp_filename, "bolt_log.aof");
+                std::cout << "⚡ [Background-Compaction] AOF Rewrite finished successfully without blocking the network loop!\n";
+            }
+            catch (const std::filesystem::filesystem_error& e)
+            {
+                std::cerr << "[Background-Compaction] Atomic rename failed: " << e.what() << std::endl;
+            }
+
+            aof_file_.open("bolt_log.aof", std::ios::app);
         }
 
-        try
-        {
-            std::filesystem::rename(tmp_filename, "bolt_log.aof");
-            std::cout << "⚡ [Compaction] AOF Rewrite successful. Log compacted cleanly!" << std::endl;
-        }
-        catch (const std::filesystem::filesystem_error& e)
-        {
-            std::cerr << "[Compaction] Atomic rename failed: " << e.what() << std::endl;
-        }
+        is_compacting_ = false;
+    });
 
-        aof_file_.open("bolt_log.aof", std::ios::app);
-    }
+    background_worker.detach();
 }
 
 } // namespace BoltKV
