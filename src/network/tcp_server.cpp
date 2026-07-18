@@ -16,7 +16,7 @@ namespace BoltKV
 {
 
 TcpServer::TcpServer(int port, ShardedDatabase& db) 
-    : port_(port), server_fd_(-1), epoll_fd_(-1), db_(db)
+    : port_(port), server_fd_(-1), epoll_fd_(-1), db_(db), auth_password_("chronexis_admin_secure")
 {
 }
 
@@ -125,7 +125,9 @@ void TcpServer::start()
             
             if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
             {
-                close(events[i].data.fd);
+                int client_fd = events[i].data.fd;
+                authenticated_clients_.erase(client_fd);
+                close(client_fd);
             }
         }
     }
@@ -150,11 +152,13 @@ void TcpServer::handle_client_data(int client_fd)
             {
                 break; 
             }
+            authenticated_clients_.erase(client_fd);
             close(client_fd);
             return;
         }
         else 
         { 
+            authenticated_clients_.erase(client_fd);
             close(client_fd);
             return;
         }
@@ -162,12 +166,12 @@ void TcpServer::handle_client_data(int client_fd)
 
     if (!raw_request.empty()) 
     {
-        std::string response = process_command(raw_request);
+        std::string response = process_command(raw_request, client_fd);
         write(client_fd, response.c_str(), response.length());
     }
 }
 
-std::string TcpServer::process_command(const std::string& raw_command) 
+std::string TcpServer::process_command(const std::string& raw_command, int client_fd) 
 {
     std::stringstream ss(raw_command);
     std::string cmd, key, value;
@@ -176,6 +180,38 @@ std::string TcpServer::process_command(const std::string& raw_command)
     for (auto &c : cmd)
     {
         c = toupper(c);
+    }
+
+    bool is_authenticated = false;
+    auto it = authenticated_clients_.find(client_fd);
+    if (it != authenticated_clients_.end())
+    {
+        is_authenticated = it->second;
+    }
+
+    if (!is_authenticated)
+    {
+        if (cmd == "AUTH")
+        {
+            std::getline(ss >> std::ws, value);
+            if (!value.empty() && value.back() == '\r')
+            {
+                value.pop_back();
+            }
+            if (value == auth_password_)
+            {
+                authenticated_clients_[client_fd] = true;
+                return "+OK\r\n";
+            }
+            else
+            {
+                return "-ERR invalid password\r\n";
+            }
+        }
+        else
+        {
+            return "-ERR authentication required\r\n";
+        }
     }
 
     if (cmd == "SET")
