@@ -5,28 +5,28 @@
 #include <vector>
 
 void test_basic_crud() {
-    BoltKV::StorageEngine engine;
+    BoltKV::ShardedDatabase db;
     
-    engine.set("test_key", "test_value");
-    auto val = engine.get("test_key");
+    db.set("test_key", "test_value");
+    auto val = db.get("test_key");
     assert(val.has_value() && val.value() == "test_value");
     
-    assert(engine.size() == 1);
+    assert(db.size() == 1);
     
-    bool deleted = engine.del("test_key");
+    bool deleted = db.del("test_key");
     assert(deleted == true);
-    assert(engine.size() == 0);
+    assert(db.size() == 0);
     
     std::cout << "✅ Basic CRUD Tests Passed!" << std::endl;
 }
 
 void test_concurrent_access() {
-    BoltKV::StorageEngine engine;
+    BoltKV::ShardedDatabase db;
     std::vector<std::thread> threads;
     
-    for (int i = 0; i < 10; ++i) {
-        threads.emplace_back([&engine, i]() {
-            engine.set("key_" + std::to_string(i), "value_" + std::to_string(i));
+    for (int i = 0; i < 100; ++i) {
+        threads.emplace_back([&db, i]() {
+            db.set("key_" + std::to_string(i), "value_" + std::to_string(i));
         });
     }
     
@@ -34,7 +34,7 @@ void test_concurrent_access() {
         th.join();
     }
     
-    assert(engine.size() == 10);
+    assert(db.size() == 100);
     std::cout << "✅ Concurrent Thread-Safety Tests Passed!" << std::endl;
 }
 

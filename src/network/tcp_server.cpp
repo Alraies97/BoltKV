@@ -15,8 +15,8 @@ constexpr int BUFFER_SIZE = 1024;
 namespace BoltKV
 {
 
-TcpServer::TcpServer(int port, StorageEngine& engine) 
-    : port_(port), server_fd_(-1), epoll_fd_(-1), engine_(engine)
+TcpServer::TcpServer(int port, ShardedDatabase& db) 
+    : port_(port), server_fd_(-1), epoll_fd_(-1), db_(db)
 {
 }
 
@@ -186,12 +186,12 @@ std::string TcpServer::process_command(const std::string& raw_command)
             value.pop_back();
         }
         
-        engine_.set(key, value);
+        db_.set(key, value);
         return "+OK\r\n";
     } 
     else if (cmd == "GET") 
     {
-        auto val = engine_.get(key);
+        auto val = db_.get(key);
         if (val) 
         {
             return "$" + *val + "\r\n";
@@ -200,12 +200,12 @@ std::string TcpServer::process_command(const std::string& raw_command)
     } 
     else if (cmd == "DEL") 
     {
-        bool deleted = engine_.del(key);
+        bool deleted = db_.del(key);
         return deleted ? ":1\r\n" : ":0\r\n";
     }
     else if (cmd == "COMPACT")
     {
-        engine_.rewrite_aof();
+        db_.rewrite_all_aofs();
         return "+OK AOF Log Compacted Cleanly\r\n";
     }
 

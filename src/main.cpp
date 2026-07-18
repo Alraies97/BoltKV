@@ -5,10 +5,10 @@
 int main() {
     try {
 
-        BoltKV::StorageEngine engine;
-        engine.load_aof();
+        BoltKV::ShardedDatabase db;
+        db.load_all_aofs();
         
-        BoltKV::TcpServer server(6380, engine); 
+        BoltKV::TcpServer server(6380, db); 
         server.start();
     } catch (const std::exception& e) {
         std::cerr << "Fatal Error: " << e.what() << std::endl;

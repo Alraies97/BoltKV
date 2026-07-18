@@ -22,7 +22,7 @@ enum class FsyncPolicy
 class StorageEngine 
 {
 public:
-    StorageEngine();
+    explicit StorageEngine(size_t shard_id);
     ~StorageEngine();
 
     StorageEngine(const StorageEngine&) = delete;
@@ -50,6 +50,7 @@ private:
     std::atomic<bool> is_compacting_{false};
     std::vector<std::string> aof_rewrite_buf_;
 
+    size_t shard_id_;
     FsyncPolicy fsync_policy_;
     std::thread aof_flusher_thread_;
     std::atomic<bool> flusher_running_;
@@ -58,6 +59,29 @@ private:
     void append_to_aof(const std::string& cmd, const std::string& key, const std::string& value = "");
     void start_flusher_thread();
     void stop_flusher_thread();
+};
+
+constexpr size_t NUM_SHARDS = 16;
+
+class ShardedDatabase 
+{
+public:
+    ShardedDatabase();
+    ~ShardedDatabase();
+
+    ShardedDatabase(const ShardedDatabase&) = delete;
+    ShardedDatabase& operator=(const ShardedDatabase&) = delete;
+
+    void set(const std::string& key, const std::string& value);
+    std::optional<std::string> get(const std::string& key);
+    bool del(const std::string& key);
+    size_t size() const;
+    void load_all_aofs();
+    void rewrite_all_aofs();
+
+private:
+    std::vector<std::unique_ptr<StorageEngine>> shards_;
+    size_t get_shard_id(const std::string& key) const;
 };
 
 } // namespace BoltKV

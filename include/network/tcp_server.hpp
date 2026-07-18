@@ -5,29 +5,16 @@
 #include <vector>
 
 namespace BoltKV {
-
-/**
- * @brief High-Performance TCP Server using Linux epoll.
- * 
- * Drives the non-blocking event loop to handle concurrent connections
- * and routes parsed network commands directly into the BoltKV StorageEngine.
- */
 class TcpServer {
     public:
-      /**
-       * @param port The port number to listen on (e.g., 6379 or 8080).
-       * @param engine Reference to the core thread-safe storage engine.
-       */
-      TcpServer(int port, StorageEngine& engine);
+      
+      TcpServer(int port, ShardedDatabase& db);
       ~TcpServer();
 
       TcpServer(const TcpServer&) = delete;
       TcpServer& operator=(const TcpServer&) = delete;
 
-      /**
-       * @brief Starts the epoll event loop and begins accepting connections.
-       * This call is blocking as it runs the infinite execution loop.
-       */
+      
 void start();
 
     private:
@@ -40,7 +27,7 @@ void start();
             int port_;
             int server_fd_;
             int epoll_fd_;
-            StorageEngine& engine_;
+            ShardedDatabase& db_;
             
 };
 

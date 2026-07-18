@@ -10,12 +10,14 @@
 namespace BoltKV
 {
 
-StorageEngine::StorageEngine()
+StorageEngine::StorageEngine(size_t shard_id)
     : fsync_policy_(FsyncPolicy::EVERY_SEC)
     , flusher_running_(false)
     , aof_file_(nullptr)
+    , shard_id_(shard_id)
 {
-    aof_file_ = fopen("bolt_log.aof", "a");
+    std::string aof_filename = "bolt_log_" + std::to_string(shard_id) + ".aof";
+    aof_file_ = fopen(aof_filename.c_str(), "a");
     if (fsync_policy_ == FsyncPolicy::EVERY_SEC)
     {
         start_flusher_thread();
@@ -169,21 +171,22 @@ void StorageEngine::load_aof()
 {
     std::unique_lock<std::shared_mutex> lock(rw_mutex_);
 
-    std::string tmp_filename = "bolt_log.tmp";
+    std::string tmp_filename = "bolt_log_" + std::to_string(shard_id_) + ".tmp";
     if (std::filesystem::exists(tmp_filename))
     {
         try
         {
             std::filesystem::remove(tmp_filename);
-            std::cout << "⚠️ [Recovery] Found and removed incomplete compaction file: " << tmp_filename << "\n";
+            std::cout << "⚠️ [Recovery Shard " << shard_id_ << "] Found and removed incomplete compaction file: " << tmp_filename << "\n";
         }
         catch (const std::filesystem::filesystem_error& e)
         {
-            std::cerr << "[Recovery] Failed to remove tmp file: " << e.what() << std::endl;
+            std::cerr << "[Recovery Shard " << shard_id_ << "] Failed to remove tmp file: " << e.what() << std::endl;
         }
     }
 
-    std::ifstream file("bolt_log.aof");
+    std::string aof_filename = "bolt_log_" + std::to_string(shard_id_) + ".aof";
+    std::ifstream file(aof_filename);
     if (!file.is_open())
     {
         return;
@@ -206,7 +209,7 @@ void StorageEngine::load_aof()
             registry_.erase(key);
         }
     }
-    std::cout << "💾 [BoltKV] Loaded recovery state from AOF. Active registry entries: " << registry_.size() << "\n";
+    std::cout << "💾 [BoltKV Shard " << shard_id_ << "] Loaded recovery state from AOF. Active registry entries: " << registry_.size() << "\n";
 }
 
 void StorageEngine::rewrite_aof()
@@ -226,7 +229,7 @@ void StorageEngine::rewrite_aof()
 
     std::thread background_worker([this, snapshot = std::move(registry_snapshot)]() mutable
     {
-        std::string tmp_filename = "bolt_log.tmp";
+        std::string tmp_filename = "bolt_log_" + std::to_string(shard_id_) + ".tmp";
         FILE* tmp_file = fopen(tmp_filename.c_str(), "w");
 
         if (!tmp_file)
@@ -264,21 +267,83 @@ void StorageEngine::rewrite_aof()
 
             try
             {
-                std::filesystem::rename(tmp_filename, "bolt_log.aof");
-                std::cout << "⚡ [Background-Compaction] AOF Rewrite finished successfully without blocking the network loop!\n";
+                std::string aof_filename = "bolt_log_" + std::to_string(shard_id_) + ".aof";
+                std::filesystem::rename(tmp_filename, aof_filename);
+                std::cout << "⚡ [Background-Compaction Shard " << shard_id_ << "] AOF Rewrite finished successfully without blocking the network loop!\n";
             }
             catch (const std::filesystem::filesystem_error& e)
             {
-                std::cerr << "[Background-Compaction] Atomic rename failed: " << e.what() << std::endl;
+                std::cerr << "[Background-Compaction Shard " << shard_id_ << "] Atomic rename failed: " << e.what() << std::endl;
             }
 
-            aof_file_ = fopen("bolt_log.aof", "a");
+            std::string aof_filename = "bolt_log_" + std::to_string(shard_id_) + ".aof";
+            aof_file_ = fopen(aof_filename.c_str(), "a");
         }
 
         is_compacting_ = false;
     });
 
     background_worker.detach();
+}
+
+ShardedDatabase::ShardedDatabase()
+{
+    shards_.reserve(NUM_SHARDS);
+    for (size_t i = 0; i < NUM_SHARDS; ++i)
+    {
+        shards_.emplace_back(std::make_unique<StorageEngine>(i));
+    }
+}
+
+ShardedDatabase::~ShardedDatabase() = default;
+
+size_t ShardedDatabase::get_shard_id(const std::string& key) const
+{
+    return std::hash<std::string>{}(key) % NUM_SHARDS;
+}
+
+void ShardedDatabase::set(const std::string& key, const std::string& value)
+{
+    size_t shard_id = get_shard_id(key);
+    shards_[shard_id]->set(key, value);
+}
+
+std::optional<std::string> ShardedDatabase::get(const std::string& key)
+{
+    size_t shard_id = get_shard_id(key);
+    return shards_[shard_id]->get(key);
+}
+
+bool ShardedDatabase::del(const std::string& key)
+{
+    size_t shard_id = get_shard_id(key);
+    return shards_[shard_id]->del(key);
+}
+
+size_t ShardedDatabase::size() const
+{
+    size_t total = 0;
+    for (const auto& shard : shards_)
+    {
+        total += shard->size();
+    }
+    return total;
+}
+
+void ShardedDatabase::load_all_aofs()
+{
+    for (const auto& shard : shards_)
+    {
+        shard->load_aof();
+    }
+}
+
+void ShardedDatabase::rewrite_all_aofs()
+{
+    for (const auto& shard : shards_)
+    {
+        shard->rewrite_aof();
+    }
 }
 
 } // namespace BoltKV
