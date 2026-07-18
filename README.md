@@ -10,7 +10,7 @@ A high-performance, sharded, in-memory key-value storage engine built from scrat
   - `ALWAYS`: `fsync()` after every write for maximum durability.
   - `EVERY_SEC`: Background thread that `fsync()`s every second for balanced performance and safety (default).
   - `NONE`: Rely on OS page cache for maximum performance.
-- **Basic Authentication** — Shared-secret handshake mechanism to protect against unauthorized access (default password: `chronexis_admin_secure`).
+- **Basic Authentication** — Shared-secret handshake mechanism to protect against unauthorized access 
 - **AOF Persistence & Safe Crash Recovery** — Each shard maintains its own Append-Only File (AOF, `bolt_log_<shard_id>.aof`), and incomplete compaction files (`bolt_log_<shard_id>.tmp`) are automatically cleaned up on startup.
 - **Background AOF Compaction** — Each shard automatically rewrites its AOF file when the number of operations exceeds a threshold to avoid unbounded file growth.
 - **Non-Blocking Networking** — A single-threaded event loop built on Linux `epoll` (edge-triggered) handles many concurrent client connections without spawning a thread per connection.
