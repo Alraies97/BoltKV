@@ -3,31 +3,89 @@
 #include <sstream>
 #include <iostream>
 #include <filesystem>
+#include <unistd.h>
+#include <chrono>
+#include <fstream>
 
 namespace BoltKV
 {
 
 StorageEngine::StorageEngine()
+    : fsync_policy_(FsyncPolicy::EVERY_SEC)
+    , flusher_running_(false)
+    , aof_file_(nullptr)
 {
-    aof_file_.open("bolt_log.aof", std::ios::app);
+    aof_file_ = fopen("bolt_log.aof", "a");
+    if (fsync_policy_ == FsyncPolicy::EVERY_SEC)
+    {
+        start_flusher_thread();
+    }
+}
+
+StorageEngine::~StorageEngine()
+{
+    stop_flusher_thread();
+    if (aof_file_)
+    {
+        fclose(aof_file_);
+    }
+}
+
+void StorageEngine::start_flusher_thread()
+{
+    flusher_running_ = true;
+    aof_flusher_thread_ = std::thread([this]()
+    {
+        while (flusher_running_)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            
+            std::lock_guard<std::mutex> lock(aof_mutex_);
+            if (aof_file_)
+            {
+                fflush(aof_file_);
+                int fd = fileno(aof_file_);
+                fsync(fd);
+            }
+        }
+    });
+}
+
+void StorageEngine::stop_flusher_thread()
+{
+    if (flusher_running_)
+    {
+        flusher_running_ = false;
+        if (aof_flusher_thread_.joinable())
+        {
+            aof_flusher_thread_.join();
+        }
+    }
 }
 
 void StorageEngine::append_to_aof(const std::string& cmd, const std::string& key, const std::string& value)
 {
-    if (aof_file_.is_open())
+    std::lock_guard<std::mutex> lock(aof_mutex_);
+    if (aof_file_)
     {
         std::string line;
         if (cmd == "SET")
         {
             line = "SET " + key + " " + value + "\n";
-            aof_file_ << line;
+            fputs(line.c_str(), aof_file_);
         }
         else if (cmd == "DEL")
         {
             line = "DEL " + key + "\n";
-            aof_file_ << line;
+            fputs(line.c_str(), aof_file_);
         }
-        aof_file_.flush(); 
+        fflush(aof_file_);
+
+        if (fsync_policy_ == FsyncPolicy::ALWAYS)
+        {
+            int fd = fileno(aof_file_);
+            fsync(fd);
+        }
 
         if (is_compacting_)
         {
@@ -110,6 +168,21 @@ size_t StorageEngine::size() const
 void StorageEngine::load_aof()
 {
     std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+
+    std::string tmp_filename = "bolt_log.tmp";
+    if (std::filesystem::exists(tmp_filename))
+    {
+        try
+        {
+            std::filesystem::remove(tmp_filename);
+            std::cout << "⚠️ [Recovery] Found and removed incomplete compaction file: " << tmp_filename << "\n";
+        }
+        catch (const std::filesystem::filesystem_error& e)
+        {
+            std::cerr << "[Recovery] Failed to remove tmp file: " << e.what() << std::endl;
+        }
+    }
+
     std::ifstream file("bolt_log.aof");
     if (!file.is_open())
     {
@@ -154,9 +227,9 @@ void StorageEngine::rewrite_aof()
     std::thread background_worker([this, snapshot = std::move(registry_snapshot)]() mutable
     {
         std::string tmp_filename = "bolt_log.tmp";
-        std::ofstream tmp_file(tmp_filename, std::ios::out | std::ios::binary);
+        FILE* tmp_file = fopen(tmp_filename.c_str(), "w");
 
-        if (!tmp_file.is_open())
+        if (!tmp_file)
         {
             is_compacting_ = false;
             return;
@@ -164,27 +237,29 @@ void StorageEngine::rewrite_aof()
 
         for (const auto& [key, value] : snapshot)
         {
-            tmp_file << "SET " << key << " " << value << "\n";
+            fprintf(tmp_file, "SET %s %s\n", key.c_str(), value.c_str());
         }
-        tmp_file.close();
+        fclose(tmp_file);
 
         {
             std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+            std::lock_guard<std::mutex> aof_lock(aof_mutex_);
 
-            std::ofstream append_tmp(tmp_filename, std::ios::app | std::ios::binary);
-            if (append_tmp.is_open())
+            FILE* append_tmp = fopen(tmp_filename.c_str(), "a");
+            if (append_tmp)
             {
                 for (const auto& cmd_line : aof_rewrite_buf_)
                 {
-                    append_tmp << cmd_line;
+                    fputs(cmd_line.c_str(), append_tmp);
                 }
                 aof_rewrite_buf_.clear(); 
-                append_tmp.close();
+                fclose(append_tmp);
             }
 
-            if (aof_file_.is_open())
+            if (aof_file_)
             {
-                aof_file_.close();
+                fclose(aof_file_);
+                aof_file_ = nullptr;
             }
 
             try
@@ -197,7 +272,7 @@ void StorageEngine::rewrite_aof()
                 std::cerr << "[Background-Compaction] Atomic rename failed: " << e.what() << std::endl;
             }
 
-            aof_file_.open("bolt_log.aof", std::ios::app);
+            aof_file_ = fopen("bolt_log.aof", "a");
         }
 
         is_compacting_ = false;
